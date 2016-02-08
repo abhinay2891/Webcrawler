@@ -1,0 +1,176 @@
+#!/usr/bin/python
+
+from socket import *
+import re
+import urlparse
+import sys
+global flags 
+global flag
+flags = []
+flag = ""
+servername = 'cs5700sp16.ccs.neu.edu'							
+serverport = int(80)
+
+username = sys.argv[1]
+password = sys.argv[2]
+
+clientsocket = socket(AF_INET,SOCK_STREAM)
+clientsocket.connect((servername,serverport))
+
+def first_GET():																	#Function to GET request FAKEBOOK home page
+	get_req = 'GET /accounts/login/ HTTP/1.0\r\nConnection: keep-alive\r\n\r\n'
+	clientsocket.send(get_req)
+	get_recv = clientsocket.recv(9999)
+	clientsocket.close()
+	return get_recv
+	#print get_recv
+
+
+
+def extract_tokens(get_recv):
+	csrf_tkn = re.search('csrftoken=(.+?);',get_recv)         						 #extracting csrf token from GET response
+	ssn_id = re.search('sessionid=(.+?);',get_recv)			 					     #extracting session id from GET response
+	csrfToken = csrf_tkn.group(1)													 #csrf token
+	sessionToken = ssn_id.group(1)												     #session ID
+	return csrfToken,sessionToken
+
+
+def POST_req(csrfToken,sessionToken):												#Sending POST request with the csrftoken and session id fetched from previous GET response
+	clientsocket = socket(AF_INET,SOCK_STREAM)
+	clientsocket.connect((servername,serverport))
+	post_request = "POST /accounts/login/ HTTP/1.0\r\nHost: cs5700sp16.ccs.neu.edu\r\nConnection: keep-alive\r\nContent-Length: 109\r\nCache-Control: max-age=0\r\nAccept: text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8\r\nOrigin: http://cs5700sp16.ccs.neu.edu\r\nContent-Type: application/x-www-form-urlencoded\r\nReferer: http://cs5700sp16.ccs.neu.edu/accounts/login/?next=/fakebook/\r\nCookie: csrftoken="+csrfToken+"; sessionid="+sessionToken+"\r\n\r\nusername="+username+"&password="+password+"&csrfmiddlewaretoken="+csrfToken+"&next=%2Ffakebook%2F\r\n\r\n"
+	#print post_req
+	clientsocket.send(post_request)
+	post_response = clientsocket.recv(9999)
+	clientsocket.close()
+	return post_response
+	#print post_recv
+
+
+
+def login_sessionid(post_response):													#Extracting new session ID after Login
+	secssn_id = re.search('sessionid=(.+?);',post_response)
+	session = secssn_id.group(1)
+	return session
+
+
+
+def get_myprofile():		 											#GET request to the initial page (my profile home page) and finding all the urls in the page,checking each url if it matches the required pattern
+	first_list = []
+	clientsocket = socket(AF_INET,SOCK_STREAM)
+	clientsocket.connect((servername,serverport))
+	get_sec = "GET /fakebook/ HTTP/1.0\r\nHost: cs5700sp16.ccs.neu.edu\r\nConnection: keep-alive\r\nReferer: http://cs5700sp16.ccs.neu.edu/accounts/login/\r\nCookie: csrftoken="+csrfToken+"; sessionid="+session+"\r\n\r\n"
+	clientsocket.send(get_sec)
+	get_rep = clientsocket.recv(99999)
+	exception_handling("/fakebook/",get_rep)
+	extract_url = re.findall('<a href="?([^">]*)', get_rep)				#Find all the URLs with this requral expression matching pattern
+	for i in extract_url:
+		if (re.match("/fakebook/[0-9]", i)):							#Upon extracting URls,check if the URLs conform to the required pattern
+			first_list.append(i)										#append it to the list to be crawled
+	return first_list
+	clientsocket.close()
+
+
+def get_profiles(a):													#The function fetches,GET request to each of the URL from the list 
+	url_list = []
+	clientsocket = socket(AF_INET,SOCK_STREAM)
+	clientsocket.connect((servername,serverport))
+	get_sec = "GET "+a+" HTTP/1.0\r\nHost: cs5700sp16.ccs.neu.edu\r\nConnection: keep-alive\r\nReferer: http://cs5700sp16.ccs.neu.edu/accounts/login/\r\nCookie: csrftoken="+csrfToken+"; sessionid="+session+"\r\n\r\n"
+	clientsocket.send(get_sec)
+	get_rep = clientsocket.recv(99999)
+	exception_handling(a,get_rep)
+	sec_flag = re.search('FLAG: ?([^</]*)',get_rep)						#Search for the secret flag from the GET response for each URL crawled
+	if sec_flag:
+		print sec_flag.group(1)											#IF secret flag is found append it to the list of secret flags and print out the flag
+		flag = sec_flag.group()
+		flags.append(flag)	
+		if (len(flags) == 5) :											# If the length of the secret flags is 5,stop the execution
+			#print flags
+			sys.exit()
+	extract_url = re.findall('<a href="?([^">]*)', get_rep)				#search fo the URLs and save them in a list
+	for i in extract_url:
+		if (re.match("/fakebook/[0-9]", i)): 							#extract the ones which match the required URL format
+			url_list.append(i)
+		elif (re.match("/fakebook/[0-9]/[a-z]/[0-9]", i)):
+			url_list.append(i)
+	return url_list														#return the list of matched URLs from each webpage
+	#print url_list
+	clientsocket.close()
+
+
+	
+
+
+
+
+def crawler():															#The code starts to crawl the website here
+	global actual_list
+	count = 0
+	visited_list = []													#Keep a list of Visited URLs,append the urls to this list after each crawl
+	duplicate_list =[]
+	#print visited_list	
+	actual_list = get_myprofile()										#get the list of urls extracted from a webpage,it might contain already visited urls and urls to be visited
+	while (len(actual_list) !=0) :										#Loop until the actual list is exhausted
+		a =actual_list[0]												#copy the url to be crawled
+		actual_list = actual_list[1:]									#remove this copied url from the actual list
+		if (a not in visited_list):										#check if the url has already been visited,if not crawl the page
+			count += 1
+			print count
+			visited_list.append(a)										#append this url to the the visited list
+			url_list = get_profiles(a)									#fetch the url list from the webpage
+			actual_list = actual_list+url_list							#now attach the new list(url_list) to actual list
+															#The basic working is,THe extracted urls are stored in the actual_list and each of the url is crawled from left to right in the list					
+															#The list traverses the parent pages and each of their child pages and so on,so it is basically Breadth first operation	
+
+
+
+
+def exception_handling(a,get_rep):
+	
+	statuscode=(get_rep.split("\n")[0]).split(" ")[1]
+	#print ""+str(count)+" :"+str(statuscode)
+
+	if statuscode == "500":
+		if a == "/fakebook/":
+			get_myprofile()
+		else:
+			get_profiles(a)	
+
+	elif statuscode == "404" or statuscode == "403":
+		if a == "/fakebook/":
+			get_myprofile()
+		else:
+			#actual_list.pop(0)
+			#get_profiles(actual_list[0])
+			pass
+
+	elif statuscode == "301" or statuscode == "302":
+		split_rep = get_rep.split("\n")
+		for nonce in split_rep:
+			if re.search("Location:", nonce):
+				space_split=nonce.split(" ")
+				final=urlparse.urlparse(space_split[1])
+				url=final.path+final.query
+		if statuscode == "301":
+			get_profiles(url)
+		else:
+			if final.netlock == "cs5700sp16.ccs.neu.edu":
+				get_profiles(url)
+			else:
+				if len(actual_list) == 1:
+					print "1st Page crawled out of domain"
+				else:
+					actual_list.pop(0)
+					get_profiles(actual_list[0])
+	elif statuscode == "200":
+		pass		
+	
+get_recv = first_GET()										#call each of the functions here
+csrfToken,sessionToken = extract_tokens(get_recv)
+post_response = POST_req(csrfToken,sessionToken)
+session = login_sessionid(post_response)
+crawler()
+
+#print count
+print flags
+clientsocket.close()
