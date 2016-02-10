@@ -1,5 +1,12 @@
 #!/usr/bin/python
 
+
+#The crawler traverses through a university based social networking website,extracting URLs from the webpage and crawling them over.
+#The process continues until all the hidden flags are recovered from 5000+ webpages(URLs)
+#The crawler avoids visiting a page twice and also avoids falling into loops
+#The URLs are extracted and stored in a list to be crawled using the Breadth first search algorithm
+#The code creates and handles TCP sockets along with handling HTTP GET and POST requests/responses,cookie management, exceptions and errors
+
 from socket import *
 import re
 import urlparse
